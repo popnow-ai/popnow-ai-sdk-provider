@@ -30,6 +30,7 @@ export interface PopNowTaskAsset {
   height?: number;
   durationSeconds?: number;
   bytes?: number;
+  expiresAt?: string;
   role?: string;
   pending?: boolean;
   unavailable?: boolean;
@@ -65,10 +66,27 @@ export interface PopNowTaskRecord {
   errorCode?: string;
   errorMessage?: string;
   costUsd?: string;
+  /** USD held when the task was accepted (create response). */
+  estimatedCostUsd?: string;
   settled?: boolean;
   createdAt?: string;
   deadlineAt?: string;
   completedAt?: string;
+}
+
+/** The subset of `POST /api/v1/jobs/quote` this package reads. */
+export interface PopNowQuote {
+  quoteId?: string;
+  model?: string;
+  /** Exact maximum USD charge, held when the task is accepted. */
+  maxChargeUsd: string;
+  /** Typical USD charge, never above `maxChargeUsd`. Informational only. */
+  expectedChargeUsd?: string;
+  currency?: string;
+  quantity?: string;
+  unit?: string;
+  expiresAt?: string;
+  [key: string]: unknown;
 }
 
 /** Options every PopNow model reads from `providerOptions.popnow`. Other keys go into the model input. */
@@ -173,12 +191,18 @@ export class PopNowApi {
     model,
     input,
     options,
+    quoteId,
+    expectedCostUsd,
     headers,
     abortSignal,
   }: {
     model: string;
     input: Record<string, unknown>;
     options: PopNowTaskOptions;
+    /** Signed quote from `quote()` for the same request. */
+    quoteId?: string;
+    /** Confirmed USD hold: the quote's `maxChargeUsd`. A changed price fails instead of charging more. */
+    expectedCostUsd?: string;
     headers?: Record<string, string | undefined>;
     abortSignal?: AbortSignal;
   }): Promise<{ value: PopNowTaskRecord; responseHeaders?: Record<string, string> }> {
@@ -186,6 +210,8 @@ export class PopNowApi {
     const wait = Math.max(0, Math.min(60, Math.floor(options.waitSeconds ?? 60)));
     const url = `${this.config.apiURL}/jobs/createTask${wait > 0 ? `?wait=${wait}` : ''}`;
     const body: Record<string, unknown> = { model, input };
+    if (quoteId) body.quoteId = quoteId;
+    if (expectedCostUsd) body.expectedCostUsd = expectedCostUsd;
     if (options.metadata) body.metadata = options.metadata;
 
     for (let attempt = 0; ; attempt++) {
@@ -222,6 +248,56 @@ export class PopNowApi {
     }
   }
 
+  /**
+   * `POST /jobs/quote`: validates a request and prices it in USD without creating a task or
+   * holding funds. Free.
+   */
+  async quote({
+    model,
+    input,
+    headers,
+    abortSignal,
+  }: {
+    model: string;
+    input: Record<string, unknown>;
+    headers?: Record<string, string | undefined>;
+    abortSignal?: AbortSignal;
+  }): Promise<PopNowQuote> {
+    const { value } = await postJsonToApi({
+      url: `${this.config.apiURL}/jobs/quote`,
+      headers: this.headers(headers),
+      body: { model, input },
+      failedResponseHandler: popnowFailedResponseHandler,
+      successfulResponseHandler: popnowEnvelopeResponseHandler<PopNowQuote>(),
+      abortSignal,
+      fetch: this.config.fetch,
+    });
+    return value;
+  }
+
+  /** `GET /models`: the model catalog, optionally filtered. */
+  async listModels(
+    params: { modality?: string; search?: string; task?: string },
+    abortSignal?: AbortSignal,
+  ): Promise<{ total?: number; items?: Array<Record<string, unknown>> }> {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) if (value) query.set(key, value);
+    const qs = query.toString();
+    const { value } = await getFromApi({
+      url: `${this.config.apiURL}/models${qs ? `?${qs}` : ''}`,
+      headers: this.headers(),
+      validateUrl: false,
+      failedResponseHandler: popnowFailedResponseHandler,
+      successfulResponseHandler: popnowEnvelopeResponseHandler<{
+        total?: number;
+        items?: Array<Record<string, unknown>>;
+      }>(),
+      abortSignal,
+      fetch: this.config.fetch,
+    });
+    return value;
+  }
+
   /** `GET /jobs/recordInfo`: the current task record. */
   async getTask(taskId: string, headers?: Record<string, string | undefined>, abortSignal?: AbortSignal) {
     return getFromApi({
@@ -233,6 +309,62 @@ export class PopNowApi {
       abortSignal,
       fetch: this.config.fetch,
     });
+  }
+
+  /**
+   * Polls `recordInfo` with growing delays until the task is final and its files are ready,
+   * or the budget runs out. Returns the last record read and whether it is done.
+   */
+  async waitForTask(
+    initial: PopNowTaskRecord,
+    {
+      timeoutMs,
+      pollIntervalMs,
+      headers,
+      abortSignal,
+    }: {
+      /** Polling budget. Defaults to the task's `deadlineAt` plus two minutes, or one hour. */
+      timeoutMs?: number;
+      pollIntervalMs?: number;
+      headers?: Record<string, string | undefined>;
+      abortSignal?: AbortSignal;
+    } = {},
+  ): Promise<{ task: PopNowTaskRecord; done: boolean; waitedMs: number; responseHeaders?: Record<string, string> }> {
+    let task = initial;
+    let responseHeaders: Record<string, string> | undefined;
+    const started = Date.now();
+    if (isFullRecord(task) && isTaskDone(task)) return { task, done: true, waitedMs: 0 };
+
+    let budget = timeoutMs;
+    let interval = Math.max(0, pollIntervalMs ?? 2000);
+    let errors = 0;
+    const taskId = task.taskId;
+
+    for (;;) {
+      if (budget === undefined) {
+        const deadline = task.deadlineAt ? Date.parse(task.deadlineAt) : NaN;
+        budget = Number.isFinite(deadline)
+          ? Math.max(deadline + DEADLINE_GRACE_MS - started, DEADLINE_GRACE_MS)
+          : DEFAULT_POLL_TIMEOUT_MS;
+      }
+      const remaining = budget - (Date.now() - started);
+      if (remaining <= 0) return { task, done: false, waitedMs: Date.now() - started, responseHeaders };
+      await this.sleep(Math.min(interval, remaining), abortSignal);
+      interval = Math.min(Math.max(interval * 1.5, 1), MAX_POLL_INTERVAL_MS);
+
+      try {
+        const res = await this.getTask(taskId, headers, abortSignal);
+        task = res.value;
+        responseHeaders = res.responseHeaders;
+        errors = 0;
+      } catch (error) {
+        // Reading a task is safe to repeat; tolerate a few transient failures in a row.
+        if (isAbortError(error) || !APICallError.isInstance(error) || !error.isRetryable) throw error;
+        if (++errors >= POLL_MAX_CONSECUTIVE_ERRORS) throw error;
+        continue;
+      }
+      if (isTaskDone(task)) return { task, done: true, waitedMs: Date.now() - started, responseHeaders };
+    }
   }
 
   /**
@@ -248,47 +380,18 @@ export class PopNowApi {
   }): Promise<{ task: PopNowTaskRecord; responseHeaders?: Record<string, string> }> {
     const { options, headers, abortSignal } = args;
     const created = await this.createTask(args);
-    let task = created.value;
-    let responseHeaders = created.responseHeaders;
-
-    if (!(isFullRecord(task) && isTaskDone(task))) {
-      const started = Date.now();
-      let budget = options.pollTimeoutMs;
-      let interval = Math.max(0, options.pollIntervalMs ?? 2000);
-      let errors = 0;
-      const taskId = task.taskId;
-
-      for (;;) {
-        if (budget === undefined) {
-          const deadline = task.deadlineAt ? Date.parse(task.deadlineAt) : NaN;
-          budget = Number.isFinite(deadline)
-            ? Math.max(deadline + DEADLINE_GRACE_MS - started, DEADLINE_GRACE_MS)
-            : DEFAULT_POLL_TIMEOUT_MS;
-        }
-        const remaining = budget - (Date.now() - started);
-        if (remaining <= 0) {
-          throw new PopNowTaskTimeoutError({ taskId, state: task.state, waitedMs: Date.now() - started });
-        }
-        await this.sleep(Math.min(interval, remaining), abortSignal);
-        interval = Math.min(Math.max(interval * 1.5, 1), MAX_POLL_INTERVAL_MS);
-
-        try {
-          const res = await this.getTask(taskId, headers, abortSignal);
-          task = res.value;
-          responseHeaders = res.responseHeaders;
-          errors = 0;
-        } catch (error) {
-          // Reading a task is safe to repeat; tolerate a few transient failures in a row.
-          if (isAbortError(error) || !APICallError.isInstance(error) || !error.isRetryable) throw error;
-          if (++errors >= POLL_MAX_CONSECUTIVE_ERRORS) throw error;
-          continue;
-        }
-        if (isTaskDone(task)) break;
-      }
+    const waited = await this.waitForTask(created.value, {
+      timeoutMs: options.pollTimeoutMs,
+      pollIntervalMs: options.pollIntervalMs,
+      headers,
+      abortSignal,
+    });
+    const { task } = waited;
+    if (!waited.done) {
+      throw new PopNowTaskTimeoutError({ taskId: task.taskId, state: task.state, waitedMs: waited.waitedMs });
     }
-
     if (task.state !== 'succeeded') throw new PopNowTaskError(task);
-    return { task, responseHeaders };
+    return { task, responseHeaders: waited.responseHeaders ?? created.responseHeaders };
   }
 
   /** Downloads an output file from its signed URL. The API key is never sent there. */

@@ -62,8 +62,8 @@ export interface PopNowProvider extends ProviderV4 {
 
 const DEFAULT_BASE_URL = 'https://api.popnow.ai';
 
-/** Creates a PopNow provider instance. */
-export function createPopNow(options: PopNowProviderSettings = {}): PopNowProvider {
+/** Resolves settings shared by the provider and the agent tools. @internal */
+export function resolvePopNowSettings(options: PopNowProviderSettings = {}) {
   const baseURL =
     withoutTrailingSlash(
       loadOptionalSetting({ settingValue: options.baseURL, environmentVariableName: 'POPNOW_BASE_URL' }),
@@ -91,6 +91,13 @@ export function createPopNow(options: PopNowProviderSettings = {}): PopNowProvid
     fetch: options.fetch,
     schemaCache,
   });
+
+  return { baseURL, getApiKey, config };
+}
+
+/** Creates a PopNow provider instance. */
+export function createPopNow(options: PopNowProviderSettings = {}): PopNowProvider {
+  const { baseURL, getApiKey, config } = resolvePopNowSettings(options);
 
   const chatProvider = createOpenAICompatible({
     name: 'popnow',
