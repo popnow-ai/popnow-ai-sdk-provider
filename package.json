@@ -1,0 +1,85 @@
+{
+  "name": "@popnow/ai-sdk-provider",
+  "version": "0.1.0",
+  "description": "PopNow provider for the Vercel AI SDK: image generation, text to speech, transcription and chat models through one PopNow API key.",
+  "license": "MIT",
+  "author": "PopNow (https://popnow.ai)",
+  "homepage": "https://popnow.ai/docs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/popnow-ai/popnow-ai-sdk-provider.git"
+  },
+  "bugs": {
+    "url": "https://github.com/popnow-ai/popnow-ai-sdk-provider/issues"
+  },
+  "keywords": [
+    "ai",
+    "ai-sdk",
+    "vercel-ai-sdk",
+    "ai-sdk-provider",
+    "popnow",
+    "image-generation",
+    "text-to-image",
+    "text-to-speech",
+    "speech-to-text",
+    "nano-banana",
+    "gpt-image",
+    "seedream",
+    "flux"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build && npm run smoke",
+    "smoke": "node scripts/smoke.mjs && node scripts/smoke.cjs"
+  },
+  "dependencies": {
+    "@ai-sdk/openai-compatible": "^3.0.85",
+    "@ai-sdk/provider": "^4.0.36",
+    "@ai-sdk/provider-utils": "^5.0.75"
+  },
+  "peerDependencies": {
+    "ai": "^7.0.0",
+    "zod": "^3.25.76 || ^4.1.8"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "ai": "7.0.163",
+    "tsup": "8.5.1",
+    "typescript": "5.9.3",
+    "vitest": "3.2.7",
+    "zod": "4.6.7"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

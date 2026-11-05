@@ -1,0 +1,9 @@
+--- a/content/docs/02-foundations/02-providers-and-models.mdx
++++ b/content/docs/02-foundations/02-providers-and-models.mdx
+@@ -100,5 +100,6 @@
+ - [Interfaze Provider](/providers/community-providers/interfaze) (`@interfaze-ai/ai-sdk`)
+ - [Telnyx Provider](/providers/community-providers/telnyx) (`@telnyx/ai-sdk-provider`)
+ - [ZeroGPU Provider](/providers/community-providers/zerogpu) (`@zerogpu/ai-sdk-provider`)
++- [PopNow Provider](/providers/community-providers/popnow) (`@popnow/ai-sdk-provider`)
+ 
+ ## Self-Hosted Models
