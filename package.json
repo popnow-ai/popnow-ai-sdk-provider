@@ -1,6 +1,6 @@
 {
   "name": "@popnow/ai-sdk-provider",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "PopNow provider for the Vercel AI SDK: image generation, text to speech, transcription and chat models through one PopNow API key.",
   "license": "MIT",
   "author": "PopNow (https://popnow.ai)",

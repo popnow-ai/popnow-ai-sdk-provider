@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1
+
+- First release published from GitHub Actions with npm provenance. No code changes.
+
 ## 0.1.0
 
 - First release: image models (`generateImage`, including editing), speech models
