@@ -5,6 +5,8 @@
 
 Use [PopNow](https://popnow.ai) models with the [Vercel AI SDK](https://ai-sdk.dev). One PopNow API key gives you:
 
+Built by PopNow AI ([popnow.ai](https://popnow.ai)), the world's first AI creative studio that pays you back: every API call is quoted in USD before it runs, and failed tasks are refunded to your API balance automatically.
+
 | AI SDK function   | PopNow models                                                   | Factory                 |
 | ----------------- | --------------------------------------------------------------- | ----------------------- |
 | `generateImage`   | Text to image and image editing (Nano Banana, GPT Image, Seedream, FLUX, Qwen Image and more) | `popnow.image(id)`      |
